@@ -27,6 +27,7 @@ _CHATGPT_DOMAINS = {
 _DEFAULT_BROWSER_ORDER = ["arc", "chrome", "edge", "firefox", "brave"]
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 _ACCESS_TOKEN_CACHE: Dict[str, Any] = {}
+_ACCESS_TOKEN_CACHE_MULTI: Dict[str, Dict[str, Any]] = {}
 
 _CHATGPT_BROWSER_AUTH = os.getenv("CHATGPT_BROWSER_AUTH", "false").lower() in (
     "true",
@@ -41,7 +42,28 @@ _CHATGPT_BROWSER_AUTH_ALLOW_REMOTE = os.getenv(
 
 
 def is_browser_auth_token(token: Optional[str]) -> bool:
-    return bool(token and token.strip().lower() in BROWSER_TOKEN_ALIASES)
+    if not token:
+        return False
+    lower = token.strip().lower()
+    if lower in BROWSER_TOKEN_ALIASES:
+        return True
+    if ":" in lower:
+        prefix = lower.split(":", 1)[0]
+        return prefix in BROWSER_TOKEN_ALIASES
+    return False
+
+
+def parse_browser_token(token: Optional[str]) -> Tuple[bool, Optional[str]]:
+    if not token:
+        return False, None
+    lower = token.strip().lower()
+    if lower in BROWSER_TOKEN_ALIASES:
+        return True, None
+    if ":" in token:
+        prefix, profile = token.split(":", 1)
+        if prefix.strip().lower() in BROWSER_TOKEN_ALIASES:
+            return True, profile.strip() or None
+    return False, None
 
 
 def ensure_browser_auth_request_allowed(request: Optional[Request] = None) -> None:
@@ -254,6 +276,73 @@ def extract_cookie_header_from_browser() -> Tuple[Optional[str], List[str]]:
     return None, diagnostics
 
 
+def extract_all_cookie_headers() -> List[Tuple[str, str, str]]:
+    env_cookie = _cookie_header_from_env()
+    if env_cookie:
+        logger.info("Loaded ChatGPT cookies from CHATGPT_COOKIE environment")
+        return [("env", env_cookie, "env")]
+
+    browser_cookie3 = _load_browser_cookie3()
+    if browser_cookie3 is None:
+        return []
+
+    browser_loaders = {
+        "arc": getattr(browser_cookie3, "arc", None),
+        "chrome": getattr(browser_cookie3, "chrome", None),
+        "edge": getattr(browser_cookie3, "edge", None),
+        "firefox": getattr(browser_cookie3, "firefox", None),
+        "brave": getattr(browser_cookie3, "brave", None),
+    }
+
+    results: List[Tuple[str, str, str]] = []
+
+    for browser_name in _get_browser_order():
+        loader = browser_loaders.get(browser_name)
+        if loader is None:
+            continue
+
+        if browser_name == "firefox":
+            try:
+                cookie_header = _cookie_header_from_jar(
+                    _call_cookie_loader(loader), "%s(default)" % browser_name
+                )
+                if cookie_header:
+                    profile_key = "%s[default]" % browser_name
+                    results.append((profile_key, cookie_header, "%s(default)" % browser_name))
+            except Exception as exc:
+                logger.debug("firefox cookie extraction failed: %s" % exc)
+            continue
+
+        cookie_files = _iter_chromium_cookie_files(browser_name)
+        if not cookie_files:
+            try:
+                cookie_header = _cookie_header_from_jar(
+                    _call_cookie_loader(loader), "%s(default)" % browser_name
+                )
+                if cookie_header:
+                    profile_key = "%s[default]" % browser_name
+                    results.append((profile_key, cookie_header, "%s(default)" % browser_name))
+            except Exception as exc:
+                logger.debug("%s default cookie extraction failed: %s" % (browser_name, exc))
+            continue
+
+        for cookie_file in cookie_files:
+            profile = os.path.basename(os.path.dirname(cookie_file))
+            if profile == "Network":
+                profile = os.path.basename(os.path.dirname(os.path.dirname(cookie_file)))
+            source = "%s[%s]" % (browser_name, profile)
+            try:
+                cookie_header = _cookie_header_from_jar(
+                    _call_cookie_loader(loader, cookie_file=cookie_file), source
+                )
+                if cookie_header:
+                    results.append((source, cookie_header, source))
+            except Exception as exc:
+                logger.debug("%s cookie extraction failed: %s" % (source, exc))
+
+    return results
+
+
 def mask_token(token: str) -> str:
     if len(token) <= 16:
         return "***"
@@ -280,18 +369,18 @@ def _session_cache_valid(cookie_hash: str) -> bool:
     return int(time.time()) < int(expires_at) - 60
 
 
-async def get_browser_session(force_refresh: bool = False) -> Dict[str, Any]:
-    cookie_header, diagnostics = extract_cookie_header_from_browser()
-    if not cookie_header:
-        detail = "No ChatGPT cookies found. Log in to chatgpt.com in Arc/Chrome/Edge/Firefox/Brave first."
-        if diagnostics:
-            detail += " Diagnostics: " + "; ".join(diagnostics[:5])
-        raise HTTPException(status_code=401, detail=detail)
+def _session_cache_valid_multi(profile_key: str, cookie_hash: str) -> bool:
+    cache = _ACCESS_TOKEN_CACHE_MULTI.get(profile_key)
+    if not cache:
+        return False
+    if cache.get("cookie_hash") != cookie_hash:
+        return False
+    expires_at = cache.get("expires_at") or 0
+    return int(time.time()) < int(expires_at) - 60
 
+
+async def _fetch_session_for_cookie(cookie_header: str, profile_key: str) -> Dict[str, Any]:
     cookie_hash = hashlib.sha256(cookie_header.encode("utf-8")).hexdigest()
-    if not force_refresh and _session_cache_valid(cookie_hash):
-        return _ACCESS_TOKEN_CACHE.copy()
-
     host_url = os.getenv("CHATGPT_BROWSER_AUTH_BASE_URL", "https://chatgpt.com").rstrip("/")
     client = Client(impersonate="chrome120")
     headers = {
@@ -309,12 +398,15 @@ async def get_browser_session(force_refresh: bool = False) -> Dict[str, Any]:
         response = await client.get("%s/api/auth/session" % host_url, headers=headers, timeout=15)
         if response.status_code in (401, 403):
             raise HTTPException(
-                status_code=401, detail="ChatGPT browser cookies are expired or invalid."
+                status_code=401,
+                detail="ChatGPT browser cookies are expired or invalid (profile: %s)."
+                % profile_key,
             )
         if response.status_code != 200:
             raise HTTPException(
                 status_code=response.status_code,
-                detail="Failed to fetch ChatGPT session from browser cookies.",
+                detail="Failed to fetch ChatGPT session from browser cookies (profile: %s)."
+                % profile_key,
             )
 
         try:
@@ -325,28 +417,89 @@ async def get_browser_session(force_refresh: bool = False) -> Dict[str, Any]:
         access_token = session.get("accessToken")
         if not access_token:
             raise HTTPException(
-                status_code=401, detail="ChatGPT session did not include an accessToken."
+                status_code=401,
+                detail="ChatGPT session did not include an accessToken (profile: %s)."
+                % profile_key,
             )
 
         expires_at = jwt_expires_at(access_token) or int(time.time()) + 600
-        _ACCESS_TOKEN_CACHE.clear()
-        _ACCESS_TOKEN_CACHE.update(
-            {
-                "access_token": access_token,
-                "access_token_preview": mask_token(access_token),
-                "cookie_hash": cookie_hash,
-                "expires_at": expires_at,
-                "user": session.get("user"),
-            }
-        )
+        result = {
+            "profile_key": profile_key,
+            "access_token": access_token,
+            "access_token_preview": mask_token(access_token),
+            "cookie_hash": cookie_hash,
+            "expires_at": expires_at,
+            "user": session.get("user"),
+        }
         logger.info(
-            "Loaded ChatGPT access token from browser cookies: %s" % mask_token(access_token)
+            "Loaded ChatGPT access token for profile '%s': %s"
+            % (profile_key, mask_token(access_token))
         )
-        return _ACCESS_TOKEN_CACHE.copy()
+        return result
     finally:
         await client.close()
 
 
-async def get_access_token_from_browser(force_refresh: bool = False) -> str:
-    session = await get_browser_session(force_refresh=force_refresh)
+async def get_all_browser_sessions(force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
+    all_cookies = extract_all_cookie_headers()
+    if not all_cookies:
+        raise HTTPException(
+            status_code=401,
+            detail="No ChatGPT cookies found. Log in to chatgpt.com in a browser first.",
+        )
+
+    results: Dict[str, Dict[str, Any]] = {}
+    for profile_key, cookie_header, source in all_cookies:
+        cookie_hash = hashlib.sha256(cookie_header.encode("utf-8")).hexdigest()
+        if not force_refresh and _session_cache_valid_multi(profile_key, cookie_hash):
+            results[profile_key] = _ACCESS_TOKEN_CACHE_MULTI[profile_key].copy()
+            continue
+        try:
+            session = await _fetch_session_for_cookie(cookie_header, profile_key)
+            _ACCESS_TOKEN_CACHE_MULTI[profile_key] = session.copy()
+            results[profile_key] = session
+        except Exception as e:
+            logger.warning("Skipping profile '%s': %s" % (profile_key, e))
+            results[profile_key] = {"profile_key": profile_key, "error": str(e)}
+
+    return results
+
+
+async def get_browser_session(
+    force_refresh: bool = False, profile: Optional[str] = None
+) -> Dict[str, Any]:
+    if profile:
+        all_results = await get_all_browser_sessions(force_refresh=force_refresh)
+        if profile not in all_results:
+            available = list(all_results.keys())
+            raise HTTPException(
+                status_code=404,
+                detail="Profile '%s' not found. Available profiles: %s" % (profile, available),
+            )
+        result = all_results[profile]
+        if "error" in result:
+            raise HTTPException(status_code=401, detail=result["error"])
+        return result
+
+    cookie_header, diagnostics = extract_cookie_header_from_browser()
+    if not cookie_header:
+        detail = "No ChatGPT cookies found. Log in to chatgpt.com in Arc/Chrome/Edge/Firefox/Brave first."
+        if diagnostics:
+            detail += " Diagnostics: " + "; ".join(diagnostics[:5])
+        raise HTTPException(status_code=401, detail=detail)
+
+    cookie_hash = hashlib.sha256(cookie_header.encode("utf-8")).hexdigest()
+    if not force_refresh and _session_cache_valid(cookie_hash):
+        return _ACCESS_TOKEN_CACHE.copy()
+
+    session = await _fetch_session_for_cookie(cookie_header, "default")
+    _ACCESS_TOKEN_CACHE.clear()
+    _ACCESS_TOKEN_CACHE.update(session)
+    return _ACCESS_TOKEN_CACHE.copy()
+
+
+async def get_access_token_from_browser(
+    force_refresh: bool = False, profile: Optional[str] = None
+) -> str:
+    session = await get_browser_session(force_refresh=force_refresh, profile=profile)
     return session["access_token"]

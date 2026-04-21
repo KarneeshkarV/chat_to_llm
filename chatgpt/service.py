@@ -92,10 +92,10 @@ class ChatService:
         self.user_agent = ""
         self.impersonate = "chrome120"
 
-    async def set_dynamic_data(self, data: Dict[str, Any]) -> None:
+    async def set_dynamic_data(self, data: Dict[str, Any], profile: Optional[str] = None) -> None:
         if self.req_token:
             if is_browser_auth_token(self.req_token):
-                self.access_token = await get_access_token_from_browser()
+                self.access_token = await get_access_token_from_browser(profile=profile)
             elif self.req_token.startswith("eyJhbGciOi") or self.req_token.startswith("fk-"):
                 self.access_token = self.req_token
             else:

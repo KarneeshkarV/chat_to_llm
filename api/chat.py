@@ -10,16 +10,18 @@ from starlette.background import BackgroundTask
 
 from chatgpt.browser_auth import (
     ensure_browser_auth_request_allowed,
+    get_all_browser_sessions,
     get_browser_session,
     is_browser_auth_token,
+    parse_browser_token,
 )
 from chatgpt.service import ChatService
 
 
-async def _process(request_data: dict, req_token: Optional[str]):
+async def _process(request_data: dict, req_token: Optional[str], profile: Optional[str] = None):
     chat_service = ChatService(req_token)
     try:
-        await chat_service.set_dynamic_data(request_data)
+        await chat_service.set_dynamic_data(request_data, profile=profile)
         await chat_service.get_chat_requirements()
     except HTTPException:
         await chat_service.close_client()
@@ -40,15 +42,20 @@ def register_routes(app) -> None:
         credentials: HTTPAuthorizationCredentials = Security(app.state.security_scheme),
     ):
         req_token = credentials.credentials
-        if is_browser_auth_token(req_token):
+        is_browser, profile_from_token = (
+            parse_browser_token(req_token) if is_browser_auth_token(req_token) else (False, None)
+        )
+        if is_browser:
             ensure_browser_auth_request_allowed(request)
+
+        profile = request.headers.get("chatgpt-profile") or profile_from_token
 
         try:
             request_data = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail={"error": "Invalid JSON body"})
 
-        chat_service, res = await _process(request_data, req_token)
+        chat_service, res = await _process(request_data, req_token, profile=profile)
         try:
             if isinstance(res, types.AsyncGeneratorType):
                 background = BackgroundTask(chat_service.close_client)
@@ -73,3 +80,23 @@ def register_routes(app) -> None:
             "expires_at": session.get("expires_at"),
             "user": session.get("user"),
         }
+
+    @app.get("/tokens/browser/profiles")
+    async def browser_profiles(request: Request, force_refresh: bool = False):
+        ensure_browser_auth_request_allowed(request)
+        all_sessions = await get_all_browser_sessions(force_refresh=force_refresh)
+        profiles = []
+        for profile_key, session in all_sessions.items():
+            entry = {
+                "profile": profile_key,
+                "access_token_preview": session.get("access_token_preview"),
+                "expires_at": session.get("expires_at"),
+                "user": session.get("user"),
+            }
+            if "error" in session:
+                entry["error"] = session["error"]
+                entry["status"] = "error"
+            else:
+                entry["status"] = "success"
+            profiles.append(entry)
+        return {"profiles": profiles}
