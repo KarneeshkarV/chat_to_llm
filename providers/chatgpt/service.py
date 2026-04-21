@@ -10,16 +10,17 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException
 from starlette.concurrency import run_in_threadpool
 
-from chatgpt.browser_auth import get_access_token_from_browser, is_browser_auth_token
-from chatgpt.client import Client
-from chatgpt.formatting import (
+from providers.base import BaseService
+from providers.chatgpt.auth import ChatGPTAuth
+from providers.chatgpt.formatting import (
     api_messages_to_chat,
     format_not_stream_response,
     head_process_response,
     stream_response,
 )
-from chatgpt.fp import generate_fingerprint
-from chatgpt.pow import get_answer_token, get_config, get_dpl, get_requirements_token
+from providers.chatgpt.fp import generate_fingerprint
+from providers.chatgpt.pow import get_answer_token, get_config, get_dpl, get_requirements_token
+from providers.common import Client
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,9 @@ def _resolve_model(origin_model: str) -> str:
     return "gpt-4o"
 
 
-class ChatService:
+class ChatGPTService(BaseService):
     def __init__(self, token: Optional[str] = None) -> None:
-        self.req_token = token
+        super().__init__(token)
         self.access_token: Optional[str] = None
         self.account_id: Optional[str] = None
         self.chat_token = "gAAAAAB"
@@ -91,11 +92,12 @@ class ChatService:
         self.chat_request: Optional[Dict[str, Any]] = None
         self.user_agent = ""
         self.impersonate = "chrome120"
+        self._auth = ChatGPTAuth()
 
     async def set_dynamic_data(self, data: Dict[str, Any], profile: Optional[str] = None) -> None:
         if self.req_token:
-            if is_browser_auth_token(self.req_token):
-                self.access_token = await get_access_token_from_browser(profile=profile)
+            if self._auth.is_browser_token(self.req_token):
+                self.access_token = await self._auth.get_access_token(profile=profile)
             elif self.req_token.startswith("eyJhbGciOi") or self.req_token.startswith("fk-"):
                 self.access_token = self.req_token
             else:
