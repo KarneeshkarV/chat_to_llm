@@ -748,6 +748,12 @@ The server will skip the bootstrap and use the override directly. IDs rotate, so
                               └──────────────────────────┘
 ```
 
+## References
+
+- ChatGPT reference: [chat2api](https://github.com/lanqian528/chat2api)
+- Claude reference: [clewdr](https://github.com/Xerxes-2/clewdr)
+- Grok reference: [Grok3API](https://github.com/boykopovar/Grok3API)
+
 ### Project structure
 
 ```
