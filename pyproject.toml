@@ -17,6 +17,7 @@ dependencies = [
     "pybase64",
     "ua-generator",
     "playwright>=1.58.0",
+    "gemini-webapi>=2.0.0",
 ]
 
 [project.optional-dependencies]

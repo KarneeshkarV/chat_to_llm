@@ -141,6 +141,11 @@ def register_routes(app) -> None:
     app.post("/tokens/claude/browser")(_make_browser_token_route("claude"))
     app.get("/tokens/claude/browser/profiles")(_make_browser_profiles_route("claude"))
 
+    # Gemini
+    app.post("/v1/gemini/chat/completions")(_make_chat_route("gemini", security_scheme))
+    app.post("/tokens/gemini/browser")(_make_browser_token_route("gemini"))
+    app.get("/tokens/gemini/browser/profiles")(_make_browser_profiles_route("gemini"))
+
     # Grok
     app.post("/v1/grok/chat/completions")(_make_chat_route("grok", security_scheme))
     app.post("/tokens/grok/browser")(_make_browser_token_route("grok"))

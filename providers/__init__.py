@@ -12,6 +12,9 @@ from providers.chatgpt.service import ChatGPTService as _ChatGPTService
 from providers.claude.auth import ClaudeAuth as _ClaudeAuth
 from providers.claude.formatting import ClaudeFormatter as _ClaudeFormatter
 from providers.claude.service import ClaudeService as _ClaudeService
+from providers.gemini.auth import GeminiAuth as _GeminiAuth
+from providers.gemini.formatting import GeminiFormatter as _GeminiFormatter
+from providers.gemini.service import GeminiService as _GeminiService
 from providers.grok.auth import GrokAuth as _GrokAuth
 from providers.grok.formatting import GrokFormatter as _GrokFormatter
 from providers.grok.service import GrokService as _GrokService
@@ -46,6 +49,12 @@ _REGISTRY: dict[str, ProviderEntry] = {
         service=_ClaudeService,
         formatter=_ClaudeFormatter,
         name="claude",
+    ),
+    "gemini": ProviderEntry(
+        auth=_GeminiAuth,
+        service=_GeminiService,
+        formatter=_GeminiFormatter,
+        name="gemini",
     ),
     "grok": ProviderEntry(
         auth=_GrokAuth,

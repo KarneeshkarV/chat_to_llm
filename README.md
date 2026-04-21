@@ -1,6 +1,6 @@
 # Chat-to-LLM
 
-Local API server that exposes OpenAI-compatible endpoints backed by browser-authenticated ChatGPT, Claude Web, and Grok sessions.
+Local API server that exposes OpenAI-compatible endpoints backed by browser-authenticated ChatGPT, Claude Web, Gemini Web, and Grok sessions.
 
 No API keys. No ChatGPT Plus required. Just your existing browser session.
 
@@ -12,9 +12,12 @@ No API keys. No ChatGPT Plus required. Just your existing browser session.
 - [API Reference](#api-reference)
   - [POST /v1/chat/completions](#post-v1chatcompletions)
   - [POST /v1/claude/chat/completions](#post-v1claudechatcompletions)
+  - [POST /v1/gemini/chat/completions](#post-v1geminichatcompletions)
   - [POST /tokens/browser](#post-tokensbrowser)
   - [POST /tokens/claude/browser](#post-tokensclaudebrowser)
   - [GET /tokens/claude/browser/profiles](#get-tokensclaudebrowserprofiles)
+  - [POST /tokens/gemini/browser](#post-tokensgeminibrowser)
+  - [GET /tokens/gemini/browser/profiles](#get-tokensgeminibrowserprofiles)
 - [Request Formats](#request-formats)
   - [Non-streaming chat](#non-streaming-chat)
   - [Streaming chat](#streaming-chat)
@@ -75,6 +78,23 @@ curl http://localhost:8000/v1/claude/chat/completions \
   -H "Authorization: Bearer claude-browser" \
   -H "Content-Type: application/json" \
   -d '{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
+```
+
+### Gemini Quickstart
+
+Gemini uses your existing Google / Gemini web session. Enable Gemini browser auth explicitly:
+
+```bash
+GEMINI_BROWSER=brave GEMINI_BROWSER_AUTH=true uv run python app.py
+```
+
+Test Gemini:
+
+```bash
+curl http://localhost:8000/v1/gemini/chat/completions \
+  -H "Authorization: Bearer gemini-browser" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
 ```
 
 ### Grok Quickstart
@@ -164,6 +184,43 @@ Validate Claude browser cookies and return a masked session preview.
 ### GET /tokens/claude/browser/profiles
 
 Validate all discoverable Claude browser profiles and return masked previews for each one.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `force_refresh` | boolean | `false` | Force re-extraction from browser (ignore cache) |
+
+### POST /v1/gemini/chat/completions
+
+OpenAI-compatible Gemini Web endpoint exposed separately from the default ChatGPT route.
+
+| Header | Required | Description |
+|---|---|---|
+| `Authorization` | Yes | `Bearer gemini-browser`, `Bearer browser`, `Bearer <cookie_header>`, or `Bearer <__Secure-1PSID>|<__Secure-1PSIDTS>` |
+| `Content-Type` | Yes | `application/json` |
+| `gemini-profile` | No | Browser profile override for Gemini cookie lookup |
+
+| Body field | Type | Default | Description |
+|---|---|---|---|
+| `model` | string | `gemini-2.5-flash` | Gemini Web model name |
+| `messages` | array | required | OpenAI-style message list |
+| `stream` | boolean | `false` | Enable SSE streaming |
+| `stream_final_json` | boolean | `false` | Append a final `response.completed` SSE event containing the aggregated JSON response |
+| `max_tokens` | integer | `4096` | Approximate max tokens in response |
+| `temporary` | boolean | `false` | Use Gemini temporary mode when supported |
+
+Gemini v1 on this repo supports text chat and local-path / `data:` URL files. Tool calling is rejected with `400`.
+
+### POST /tokens/gemini/browser
+
+Validate Gemini browser cookies and return a masked session preview based on `__Secure-1PSID`.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `force_refresh` | boolean | `false` | Force re-extraction from browser (ignore cache) |
+
+### GET /tokens/gemini/browser/profiles
+
+Validate all discoverable Gemini browser profiles and return masked previews for each one.
 
 | Param | Type | Default | Description |
 |---|---|---|---|
@@ -271,6 +328,18 @@ curl -X POST http://localhost:8000/tokens/claude/browser
 curl http://localhost:8000/tokens/claude/browser/profiles
 ```
 
+### Gemini browser token check
+
+```bash
+curl -X POST http://localhost:8000/tokens/gemini/browser
+```
+
+### Gemini browser profiles check
+
+```bash
+curl http://localhost:8000/tokens/gemini/browser/profiles
+```
+
 ### Force token refresh
 
 Bypass the in-memory cache and re-extract cookies + re-fetch the access token:
@@ -283,6 +352,12 @@ For Claude:
 
 ```bash
 curl -X POST "http://localhost:8000/tokens/claude/browser?force_refresh=true"
+```
+
+For Gemini:
+
+```bash
+curl -X POST "http://localhost:8000/tokens/gemini/browser?force_refresh=true"
 ```
 
 ---
@@ -328,6 +403,13 @@ data: {"id":"chatcmpl-WNy...","object":"chat.completion.chunk","created":1776679
 data: {"id":"chatcmpl-WNy...","object":"chat.completion.chunk","created":1776679457,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"  \n3  \n4  \n5"},"logprobs":null,"finish_reason":"stop"}]}
 
 data: [DONE]
+```
+
+For Gemini only, if you send `"stream_final_json": true`, the stream appends one extra SSE event before `[DONE]`:
+
+```text
+event: response.completed
+data: {"id":"chatcmpl-...","object":"chat.completion","created":1776772341,"model":"gemini-3-flash","choices":[{"index":0,"message":{"role":"assistant","content":"1\n2\n3"},"logprobs":null,"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":1,"total_tokens":13}}
 ```
 
 | Chunk type | `delta` content | `finish_reason` |
@@ -431,6 +513,19 @@ All configuration is via environment variables or `.env` file.
 | `CLAUDE_COOKIE` | | Raw cookie string override for `claude.ai` |
 | `CLAUDE_BASE_URL` | `https://claude.ai` | Claude Web base URL |
 
+### Gemini
+
+| Variable | Default | Description |
+|---|---|---|
+| `GEMINI_BROWSER_AUTH` | `false` | **Must be `true`** to use Gemini browser cookie auth |
+| `GEMINI_BROWSER_AUTH_ALLOW_REMOTE` | `false` | Allow remote callers for Gemini endpoint |
+| `GEMINI_BROWSER` | auto-detect | Which browser to try first for Gemini cookies: `arc`, `chrome`, `edge`, `firefox`, `brave`, `zen` |
+| `GEMINI_CHROME_PROFILE` | auto-detect | Chromium profile name for Gemini cookies |
+| `GEMINI_COOKIE` | | Raw cookie string override for `google.com` / `gemini.google.com` |
+| `GEMINI_SECURE_1PSID` | | Direct `__Secure-1PSID` cookie value |
+| `GEMINI_SECURE_1PSIDTS` | | Direct `__Secure-1PSIDTS` cookie value |
+| `GEMINI_PROXY` | | Proxy override for Gemini requests |
+
 ### Behavior
 
 | Variable | Default | Description |
@@ -487,6 +582,15 @@ CLAUDE_CHROME_PROFILE=Default
 CLAUDE_COOKIE=
 CLAUDE_BASE_URL=https://claude.ai
 
+# Gemini
+GEMINI_BROWSER_AUTH=true
+GEMINI_BROWSER=brave
+GEMINI_CHROME_PROFILE=Default
+GEMINI_COOKIE=
+GEMINI_SECURE_1PSID=
+GEMINI_SECURE_1PSIDTS=
+GEMINI_PROXY=
+
 # Grok
 GROK_BROWSER_AUTH=true
 GROK_BROWSER=brave
@@ -513,6 +617,8 @@ CONVERSATION_ONLY=false
 You must explicitly set `CHATGPT_BROWSER_AUTH=true`. Without it, every request returns `403`.
 
 Claude behaves the same way on its separate endpoint: set `CLAUDE_BROWSER_AUTH=true` before using `Bearer claude-browser` or `Bearer browser` on `/v1/claude/chat/completions`.
+
+Gemini behaves the same way on `/v1/gemini/chat/completions`: set `GEMINI_BROWSER_AUTH=true` before using `Bearer gemini-browser` or `Bearer browser`.
 
 ### Localhost-only by default
 
@@ -603,6 +709,21 @@ Claude model names are passed through directly to Claude Web.
 | Anything else | Passed through as-is |
 
 Availability depends on your Claude account tier and whatever models Claude Web currently exposes to that account.
+
+---
+
+### Gemini Models
+
+Gemini model names are passed through directly to `gemini-webapi`, which discovers what your account can use at init time.
+
+| Request model | Gemini backend model |
+|---|---|
+| `gemini-2.5-flash` | `gemini-2.5-flash` |
+| `gemini-2.5-pro` | `gemini-2.5-pro` |
+| `gemini-3-pro` | `gemini-3-pro` |
+| Anything else | Passed through as-is |
+
+Availability depends on your Google account tier and the Gemini Web models currently exposed to that account.
 
 ---
 
