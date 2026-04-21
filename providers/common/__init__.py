@@ -5,6 +5,7 @@ from providers.common.browser import (
     cookie_header_from_jar,
     get_browser_order,
     iter_chromium_cookie_files,
+    iter_zen_cookie_files,
     load_browser_cookie3,
     profile_cookie_files,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "cookie_header_from_jar",
     "get_browser_order",
     "iter_chromium_cookie_files",
+    "iter_zen_cookie_files",
     "load_browser_cookie3",
     "profile_cookie_files",
 ]

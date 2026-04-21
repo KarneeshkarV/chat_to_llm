@@ -4,11 +4,11 @@ import glob
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_BROWSER_ORDER = ["arc", "chrome", "edge", "firefox", "brave"]
+_DEFAULT_BROWSER_ORDER = ["arc", "chrome", "edge", "firefox", "brave", "zen"]
 
 
 def get_browser_order(env_var_name: str = "BROWSER") -> List[str]:
@@ -63,6 +63,47 @@ def chromium_roots(browser_name: str) -> List[str]:
             "brave": [os.path.join(config_dir, "BraveSoftware", "Brave-Browser")],
         }
     return [p for p in mapping.get(browser_name, []) if os.path.isdir(p)]
+
+
+def zen_roots() -> List[str]:
+    """Return possible Zen Browser profile root directories."""
+    home = os.path.expanduser("~")
+    candidates: List[str] = []
+    if sys.platform == "darwin":
+        candidates.append(os.path.join(home, "Library", "Application Support", "Zen"))
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", "")
+        candidates.append(os.path.join(appdata, "Zen"))
+    else:
+        candidates.append(os.path.join(home, ".zen"))
+        # Flatpak
+        candidates.append(os.path.join(home, ".var", "app", "io.github.zen_browser.zen", ".zen"))
+    return [p for p in candidates if os.path.isdir(p)]
+
+
+def iter_zen_cookie_files(profile_env_var: str = "ZEN_PROFILE") -> List[str]:
+    """Iterate Zen Browser profiles and return paths to cookies.sqlite files."""
+    paths: List[str] = []
+    profile_name = os.getenv(profile_env_var, "").strip()
+
+    for root in zen_roots():
+        if profile_name:
+            cookie_path = os.path.join(root, profile_name, "cookies.sqlite")
+            if os.path.exists(cookie_path):
+                paths.append(cookie_path)
+            continue
+
+        # Look for default profiles
+        for entry in sorted(os.listdir(root)):
+            entry_path = os.path.join(root, entry)
+            if not os.path.isdir(entry_path):
+                continue
+            if "default" in entry.lower():
+                cookie_path = os.path.join(entry_path, "cookies.sqlite")
+                if os.path.exists(cookie_path):
+                    paths.append(cookie_path)
+
+    return paths
 
 
 def iter_chromium_cookie_files(

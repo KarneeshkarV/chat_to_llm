@@ -16,6 +16,7 @@ dependencies = [
     "pyjwt",
     "pybase64",
     "ua-generator",
+    "playwright>=1.58.0",
 ]
 
 [project.optional-dependencies]

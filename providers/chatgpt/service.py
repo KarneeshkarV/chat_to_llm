@@ -38,6 +38,7 @@ _TURNSTILE_SOLVER_URL = os.getenv("TURNSTILE_SOLVER_URL", "").strip() or None
 _ARKOSE_TOKEN_URL = os.getenv("ARKOSE_TOKEN_URL", "").strip() or None
 
 _MODEL_MAP = {
+    "gpt-5.4": "gpt-5.4",
     "o3-mini-high": "o3-mini-high",
     "o3-mini-medium": "o3-mini-medium",
     "o3-mini-low": "o3-mini-low",
