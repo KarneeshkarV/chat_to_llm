@@ -1,6 +1,6 @@
 # Chat-to-LLM
 
-Local API server that reads ChatGPT cookies from your browser, exchanges them for an access token via `chatgpt.com/api/auth/session`, and exposes an OpenAI-compatible endpoint. Also supports Grok via browser automation.
+Local API server that exposes OpenAI-compatible endpoints backed by browser-authenticated ChatGPT, Claude Web, and Grok sessions.
 
 No API keys. No ChatGPT Plus required. Just your existing browser session.
 
@@ -11,7 +11,10 @@ No API keys. No ChatGPT Plus required. Just your existing browser session.
 - [Quickstart](#quickstart)
 - [API Reference](#api-reference)
   - [POST /v1/chat/completions](#post-v1chatcompletions)
+  - [POST /v1/claude/chat/completions](#post-v1claudechatcompletions)
   - [POST /tokens/browser](#post-tokensbrowser)
+  - [POST /tokens/claude/browser](#post-tokensclaudebrowser)
+  - [GET /tokens/claude/browser/profiles](#get-tokensclaudebrowserprofiles)
 - [Request Formats](#request-formats)
   - [Non-streaming chat](#non-streaming-chat)
   - [Streaming chat](#streaming-chat)
@@ -55,6 +58,23 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer browser" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
+```
+
+### Claude Quickstart
+
+Claude uses a separate endpoint and reads your existing `claude.ai` browser cookies. Enable Claude browser auth explicitly:
+
+```bash
+CLAUDE_BROWSER=brave CLAUDE_BROWSER_AUTH=true uv run python app.py
+```
+
+Test Claude:
+
+```bash
+curl http://localhost:8000/v1/claude/chat/completions \
+  -H "Authorization: Bearer claude-browser" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
 ```
 
 ### Grok Quickstart
@@ -109,6 +129,41 @@ OpenAI-compatible chat completions endpoint.
 ### POST /tokens/browser
 
 Check whether browser cookies can produce a ChatGPT access token. Returns a masked preview — **never the full token**.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `force_refresh` | boolean | `false` | Force re-extraction from browser (ignore cache) |
+
+### POST /v1/claude/chat/completions
+
+OpenAI-compatible Claude Web endpoint exposed separately from the default ChatGPT route.
+
+| Header | Required | Description |
+|---|---|---|
+| `Authorization` | Yes | `Bearer claude-browser`, `Bearer browser`, or `Bearer <raw_cookie_header>` |
+| `Content-Type` | Yes | `application/json` |
+| `claude-profile` | No | Browser profile override for Claude cookie lookup |
+
+| Body field | Type | Default | Description |
+|---|---|---|---|
+| `model` | string | `claude-3-5-sonnet-latest` | Claude Web model name |
+| `messages` | array | required | OpenAI-style message list |
+| `stream` | boolean | `false` | Enable SSE streaming |
+| `max_tokens` | integer | `4096` | Max tokens in response |
+
+Claude Web v1 on this repo supports text chat and `data:` URL images. Tool calling is rejected with `400`.
+
+### POST /tokens/claude/browser
+
+Validate Claude browser cookies and return a masked session preview.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `force_refresh` | boolean | `false` | Force re-extraction from browser (ignore cache) |
+
+### GET /tokens/claude/browser/profiles
+
+Validate all discoverable Claude browser profiles and return masked previews for each one.
 
 | Param | Type | Default | Description |
 |---|---|---|---|
@@ -204,12 +259,30 @@ curl http://localhost:8000/v1/chat/completions \
 curl -X POST http://localhost:8000/tokens/browser
 ```
 
+### Claude browser token check
+
+```bash
+curl -X POST http://localhost:8000/tokens/claude/browser
+```
+
+### Claude browser profiles check
+
+```bash
+curl http://localhost:8000/tokens/claude/browser/profiles
+```
+
 ### Force token refresh
 
 Bypass the in-memory cache and re-extract cookies + re-fetch the access token:
 
 ```bash
 curl -X POST "http://localhost:8000/tokens/browser?force_refresh=true"
+```
+
+For Claude:
+
+```bash
+curl -X POST "http://localhost:8000/tokens/claude/browser?force_refresh=true"
 ```
 
 ---
@@ -347,6 +420,17 @@ All configuration is via environment variables or `.env` file.
 | `TURNSTILE_SOLVER_URL` | | External Turnstile solver URL (optional) |
 | `ARKOSE_TOKEN_URL` | | External Arkose solver URL (optional) |
 
+### Claude
+
+| Variable | Default | Description |
+|---|---|---|
+| `CLAUDE_BROWSER_AUTH` | `false` | **Must be `true`** to use Claude browser cookie auth |
+| `CLAUDE_BROWSER_AUTH_ALLOW_REMOTE` | `false` | Allow remote callers for Claude endpoint |
+| `CLAUDE_BROWSER` | auto-detect | Which browser to try first for Claude cookies: `arc`, `chrome`, `edge`, `firefox`, `brave` |
+| `CLAUDE_CHROME_PROFILE` | auto-detect | Chromium profile name for Claude cookies |
+| `CLAUDE_COOKIE` | | Raw cookie string override for `claude.ai` |
+| `CLAUDE_BASE_URL` | `https://claude.ai` | Claude Web base URL |
+
 ### Behavior
 
 | Variable | Default | Description |
@@ -396,6 +480,13 @@ CHATGPT_BROWSER_AUTH_ALLOW_REMOTE=false
 CHATGPT_BASE_URL=https://chatgpt.com
 PROXY_URL=
 
+# Claude
+CLAUDE_BROWSER_AUTH=true
+CLAUDE_BROWSER=brave
+CLAUDE_CHROME_PROFILE=Default
+CLAUDE_COOKIE=
+CLAUDE_BASE_URL=https://claude.ai
+
 # Grok
 GROK_BROWSER_AUTH=true
 GROK_BROWSER=brave
@@ -420,6 +511,8 @@ CONVERSATION_ONLY=false
 ### Browser cookie auth is disabled by default
 
 You must explicitly set `CHATGPT_BROWSER_AUTH=true`. Without it, every request returns `403`.
+
+Claude behaves the same way on its separate endpoint: set `CLAUDE_BROWSER_AUTH=true` before using `Bearer claude-browser` or `Bearer browser` on `/v1/claude/chat/completions`.
 
 ### Localhost-only by default
 
@@ -449,6 +542,7 @@ CHATGPT_BROWSER_AUTH_ALLOW_REMOTE=true
 - Cache is keyed on SHA-256 of the cookie string
 - Cache validity is checked with a 60-second safety margin before JWT `exp`
 - Force refresh via `POST /tokens/browser?force_refresh=true`
+- Claude browser-session validation is also cached in memory by cookie hash for a short TTL
 
 ---
 
@@ -493,6 +587,22 @@ Grok model names are passed through directly to the Grok backend.
 | Anything else | `grok-3` (fallback) |
 
 Model availability depends on your xAI account tier.
+
+---
+
+### Claude Models
+
+Claude model names are passed through directly to Claude Web.
+
+| Request model | Claude backend model |
+|---|---|
+| `claude-3-5-sonnet-latest` | `claude-3-5-sonnet-latest` |
+| `claude-3-7-sonnet-latest` | `claude-3-7-sonnet-latest` |
+| `claude-sonnet-4-0` | `claude-sonnet-4-0` |
+| `claude-opus-4-0` | `claude-opus-4-0` |
+| Anything else | Passed through as-is |
+
+Availability depends on your Claude account tier and whatever models Claude Web currently exposes to that account.
 
 ---
 
@@ -653,7 +763,7 @@ chat_to_llm/
 │   │   ├── pow.py          # Proof-of-Work solver + DPL hash fetch
 │   │   ├── formatting.py   # ChatGPT SSE → OpenAI format conversion
 │   │   └── service.py      # ChatGPT backend request builder/sender
-│   ├── claude/             # Claude provider (stub)
+│   ├── claude/             # Claude Web provider
 │   └── grok/               # Grok provider (cookie + headless-browser bootstrap)
 │       ├── auth.py                # Cookie extraction + session cache
 │       ├── browser_bootstrap.py   # Playwright-driven x-statsig-id capture

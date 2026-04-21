@@ -389,10 +389,6 @@ class ChatGPTAuth(BaseAuth):
         return int(time.time()) < int(expires_at) - 60
 
 
-# Backward-compatible module-level aliases (for tests and legacy consumers)
-from providers.common.utils import jwt_expires_at, mask_token  # noqa: E402
-from providers.common.browser import get_browser_order, load_browser_cookie3  # noqa: E402
-
 _load_browser_cookie3 = load_browser_cookie3
 
 _auth_instance = ChatGPTAuth()

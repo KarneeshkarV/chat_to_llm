@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from providers.base import BaseAuth, BaseFormatter, BaseService
-
-if TYPE_CHECKING:
-    from providers.chatgpt.auth import ChatGPTAuth
-    from providers.chatgpt.service import ChatGPTService
+from providers.chatgpt.auth import ChatGPTAuth as _ChatGPTAuth
+from providers.chatgpt.formatting import (
+    format_not_stream_response,
+    stream_response,
+)
+from providers.chatgpt.service import ChatGPTService as _ChatGPTService
+from providers.claude.auth import ClaudeAuth as _ClaudeAuth
+from providers.claude.formatting import ClaudeFormatter as _ClaudeFormatter
+from providers.claude.service import ClaudeService as _ClaudeService
+from providers.grok.auth import GrokAuth as _GrokAuth
+from providers.grok.formatting import GrokFormatter as _GrokFormatter
+from providers.grok.service import GrokService as _GrokService
 
 
 @dataclass
@@ -16,21 +23,6 @@ class ProviderEntry:
     service: type[BaseService]
     formatter: type[BaseFormatter]
     name: str
-
-
-# Import here to avoid circular imports at module level
-from providers.chatgpt.auth import ChatGPTAuth as _ChatGPTAuth
-from providers.chatgpt.service import ChatGPTService as _ChatGPTService
-from providers.chatgpt.formatting import (
-    stream_response,
-    format_not_stream_response,
-)
-from providers.claude.auth import ClaudeAuth as _ClaudeAuth
-from providers.claude.service import ClaudeService as _ClaudeService
-from providers.claude.formatting import ClaudeFormatter as _ClaudeFormatter
-from providers.grok.auth import GrokAuth as _GrokAuth
-from providers.grok.service import GrokService as _GrokService
-from providers.grok.formatting import GrokFormatter as _GrokFormatter
 
 
 class ChatGPTFormatter(BaseFormatter):

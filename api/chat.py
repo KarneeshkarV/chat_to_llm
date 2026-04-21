@@ -11,13 +11,21 @@ from starlette.background import BackgroundTask
 from providers import get_provider
 
 
-def _get_profile_from_request(request: Request, auth, req_token: str) -> Optional[str]:
+def _profile_from_headers(request: Request, provider_name: str) -> Optional[str]:
+    return request.headers.get(f"{provider_name}-profile") or request.headers.get(
+        "provider-profile"
+    )
+
+
+def _get_profile_from_request(
+    request: Request, provider_name: str, auth, req_token: str
+) -> Optional[str]:
     is_browser, profile_from_token = (
         auth.parse_browser_token(req_token) if auth.is_browser_token(req_token) else (False, None)
     )
     if is_browser:
         auth.ensure_browser_auth_request_allowed(request)
-    return request.headers.get("chatgpt-profile") or profile_from_token
+    return _profile_from_headers(request, provider_name) or profile_from_token
 
 
 async def _process_chat(
@@ -28,16 +36,15 @@ async def _process_chat(
     try:
         await service.set_dynamic_data(request_data, profile=profile)
         await service.get_chat_requirements()
+        await service.prepare_send_conversation()
+        res = await service.send_conversation()
+        return service, res
     except HTTPException:
         await service.close_client()
         raise
     except Exception as e:
         await service.close_client()
         raise HTTPException(status_code=500, detail="Server error: %s" % e)
-
-    await service.prepare_send_conversation()
-    res = await service.send_conversation()
-    return service, res
 
 
 def _make_chat_route(provider_name: str, security_scheme):
@@ -48,7 +55,7 @@ def _make_chat_route(provider_name: str, security_scheme):
         credentials: HTTPAuthorizationCredentials = Security(security_scheme),
     ):
         req_token = credentials.credentials
-        profile = _get_profile_from_request(request, entry.auth(), req_token)
+        profile = _get_profile_from_request(request, provider_name, entry.auth(), req_token)
 
         try:
             request_data = await request.json()
@@ -81,7 +88,10 @@ def _make_browser_token_route(provider_name: str):
     async def browser_token(request: Request, force_refresh: bool = False):
         auth = entry.auth()
         auth.ensure_browser_auth_request_allowed(request)
-        session = await auth.get_browser_session(force_refresh=force_refresh)
+        session = await auth.get_browser_session(
+            force_refresh=force_refresh,
+            profile=_profile_from_headers(request, provider_name),
+        )
         return {
             "status": "success",
             "access_token_preview": session.get("access_token_preview"),

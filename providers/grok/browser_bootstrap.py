@@ -75,8 +75,7 @@ async def bootstrap_grok_session(
         from playwright.async_api import async_playwright
     except ImportError as exc:
         raise RuntimeError(
-            "playwright is required for Grok browser bootstrap. "
-            "Install with: uv add playwright"
+            "playwright is required for Grok browser bootstrap. Install with: uv add playwright"
         ) from exc
 
     launch_kwargs: dict = {

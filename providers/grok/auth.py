@@ -428,9 +428,7 @@ class GrokAuth(BaseAuth):
             timeout=_GROK_BOOTSTRAP_TIMEOUT,
         )
 
-    def _session_entry_valid(
-        self, entry: Optional[Dict[str, Any]], cookie_hash: str
-    ) -> bool:
+    def _session_entry_valid(self, entry: Optional[Dict[str, Any]], cookie_hash: str) -> bool:
         if not entry:
             return False
         if entry.get("cookie_hash") != cookie_hash:

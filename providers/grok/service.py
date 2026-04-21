@@ -105,9 +105,7 @@ class GrokService(BaseService):
     async def _refresh_session(self) -> None:
         if not (self.req_token and self._auth.is_browser_token(self.req_token)):
             return
-        session = await self._auth.get_browser_session(
-            force_refresh=True, profile=self._profile
-        )
+        session = await self._auth.get_browser_session(force_refresh=True, profile=self._profile)
         self.cookie_header = session["cookie_header"]
         self._statsig_id = session.get("statsig_id")
 

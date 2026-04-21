@@ -28,6 +28,13 @@ class BaseAuth(ABC):
         ...
 
     @abstractmethod
+    async def get_browser_session(
+        self, force_refresh: bool = False, profile: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get a single browser-backed session preview."""
+        ...
+
+    @abstractmethod
     def ensure_browser_auth_request_allowed(self, request: Any) -> None:
         """Raise HTTPException if browser auth is not allowed for this request."""
         ...
