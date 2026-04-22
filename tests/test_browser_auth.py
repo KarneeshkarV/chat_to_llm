@@ -6,7 +6,7 @@ import time
 from types import SimpleNamespace
 import pytest
 
-from chatgpt import browser_auth
+from providers.chatgpt import auth as browser_auth
 
 
 class TestBrowserAliasDetection:
@@ -165,7 +165,7 @@ class TestEnvCookieOverride:
     def test_no_env_no_browser_cookie3(self, monkeypatch):
         monkeypatch.delenv("CHATGPT_COOKIE", raising=False)
         monkeypatch.delenv("CHATGPT_COOKIE_STRING", raising=False)
-        monkeypatch.setattr(browser_auth, "_load_browser_cookie3", lambda: None)
+        monkeypatch.setattr("providers.chatgpt.auth.load_browser_cookie3", lambda: None)
         result, diagnostics = browser_auth.extract_cookie_header_from_browser()
         assert result is None
         assert "browser-cookie3" in diagnostics[0]
@@ -175,18 +175,18 @@ class TestBrowserOrder:
     def test_default_order(self, monkeypatch):
         monkeypatch.delenv("CHATGPT_BROWSER", raising=False)
         order = browser_auth._get_browser_order()
-        assert order == ["arc", "chrome", "edge", "firefox", "brave"]
+        assert order == ["arc", "chrome", "edge", "firefox", "brave", "zen"]
 
     def test_env_overrides_priority(self, monkeypatch):
         monkeypatch.setenv("CHATGPT_BROWSER", "firefox")
         order = browser_auth._get_browser_order()
         assert order[0] == "firefox"
-        assert len(order) == 5
+        assert len(order) == 6
 
     def test_invalid_env_uses_default(self, monkeypatch):
         monkeypatch.setenv("CHATGPT_BROWSER", "safari")
         order = browser_auth._get_browser_order()
-        assert order == ["arc", "chrome", "edge", "firefox", "brave"]
+        assert order == ["arc", "chrome", "edge", "firefox", "brave", "zen"]
 
 
 class TestChatGPTDomainMatching:
