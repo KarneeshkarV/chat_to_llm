@@ -7,6 +7,8 @@ import string
 import time
 from typing import Any, AsyncGenerator, AsyncIterator, Iterable, Optional
 
+from fastapi import HTTPException
+
 from providers.base import BaseFormatter
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,57 @@ def _event_data(lines: Iterable[str]) -> Optional[str]:
     return "\n".join(chunks)
 
 
+def _extract_text_from_event(data: dict) -> Optional[str]:
+    # Legacy "raw" rendering: {"type":"completion","completion":" ...","stop_reason":...}
+    completion = data.get("completion")
+    if isinstance(completion, str) and completion:
+        return completion
+
+    event_type = data.get("type")
+
+    # Structured "messages" rendering:
+    #   {"type":"content_block_delta","delta":{"type":"text_delta","text":" ..."}}
+    # Thinking deltas ({"type":"thinking_delta"}) are intentionally ignored —
+    # they should not appear in the user-visible assistant message.
+    if event_type == "content_block_delta":
+        delta = data.get("delta") or {}
+        if delta.get("type") == "text_delta":
+            text = delta.get("text")
+            if isinstance(text, str) and text:
+                return text
+        # Some variants put the text under "text" without a "type" tag.
+        text = delta.get("text")
+        if isinstance(text, str) and text and delta.get("type") in (None, "text_delta"):
+            return text
+        return None
+
+    # Occasional shape: content_block_start carrying an initial chunk of text.
+    if event_type == "content_block_start":
+        block = data.get("content_block") or {}
+        if block.get("type") == "text":
+            text = block.get("text")
+            if isinstance(text, str) and text:
+                return text
+    return None
+
+
+def _error_from_event(data: dict) -> Optional[str]:
+    if data.get("type") == "error":
+        err = data.get("error") or {}
+        if isinstance(err, dict):
+            return err.get("message") or err.get("type") or json.dumps(err)[:300]
+        return str(err)[:300]
+    return None
+
+
+class ClaudeRefusal(Exception):
+    """Claude.ai's safety layer refused to answer (stop_reason='refusal')."""
+
+
+def _is_refusal(data: dict) -> bool:
+    return data.get("stop_reason") == "refusal"
+
+
 async def _iter_completion_deltas(response: AsyncIterator[str]) -> AsyncGenerator[str, None]:
     async for event_lines in _iter_sse_events(response):
         payload = _event_data(event_lines)
@@ -62,9 +115,17 @@ async def _iter_completion_deltas(response: AsyncIterator[str]) -> AsyncGenerato
         except json.JSONDecodeError:
             logger.debug("Skipping non-JSON Claude SSE payload: %s", payload[:200])
             continue
-        completion = data.get("completion")
-        if isinstance(completion, str) and completion:
-            yield completion
+
+        err = _error_from_event(data)
+        if err:
+            raise HTTPException(status_code=502, detail="Claude: %s" % err)
+
+        if _is_refusal(data):
+            raise ClaudeRefusal()
+
+        text = _extract_text_from_event(data)
+        if text:
+            yield text
 
 
 class ClaudeFormatter(BaseFormatter):
@@ -151,24 +212,49 @@ class ClaudeFormatter(BaseFormatter):
         all_text = ""
         finish_reason = "stop"
 
-        async for chunk in response:
-            try:
-                if isinstance(chunk, bytes):
-                    chunk = chunk.decode("utf-8")
-                if chunk.startswith("data: [DONE]"):
-                    break
-                if not chunk.startswith("data: "):
+        try:
+            async for chunk in response:
+                try:
+                    if isinstance(chunk, bytes):
+                        chunk = chunk.decode("utf-8")
+                    if chunk.startswith("data: [DONE]"):
+                        break
+                    if not chunk.startswith("data: "):
+                        continue
+                    payload = json.loads(chunk[6:])
+                    choice = payload.get("choices", [{}])[0]
+                    delta = choice.get("delta") or {}
+                    if "content" in delta:
+                        all_text += delta["content"]
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    logger.error("Claude non-stream collect error: %s", exc)
                     continue
-                payload = json.loads(chunk[6:])
-                choice = payload.get("choices", [{}])[0]
-                delta = choice.get("delta") or {}
-                if "content" in delta:
-                    all_text += delta["content"]
-                if choice.get("finish_reason"):
-                    finish_reason = choice["finish_reason"]
-            except Exception as exc:
-                logger.error("Claude non-stream collect error: %s", exc)
-                continue
+        except ClaudeRefusal:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Claude.ai refused this request (stop_reason='refusal'). "
+                    "The web interface blocks certain prompts — financial/trading "
+                    "charts and advice are a common trigger. Try another provider "
+                    "(Gemini / ChatGPT / Grok), rephrase the prompt to remove "
+                    "trading-advice framing, or use the Anthropic API directly."
+                ),
+            )
+
+        if not all_text:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Claude returned an empty response. This usually means the "
+                    "model produced no content for the given input "
+                    "(e.g. an unreadable image or a stalled completion stream). "
+                    "Try a different image or prompt."
+                ),
+            )
 
         completion_tokens = min(_approx_completion_tokens(all_text), max_tokens)
         return {

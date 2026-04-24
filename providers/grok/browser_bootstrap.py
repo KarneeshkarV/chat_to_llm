@@ -94,7 +94,7 @@ async def bootstrap_grok_session(
             context = await browser.new_context(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                 ),
             )
             cookies = _parse_cookie_header(initial_cookie_header)
@@ -104,6 +104,18 @@ async def bootstrap_grok_session(
             page = await context.new_page()
 
             captured: dict = {"statsig": None}
+            pending_tasks: list = []
+
+            async def _resolve_headers(req):
+                if captured["statsig"]:
+                    return
+                try:
+                    all_hdrs = await req.all_headers()
+                except Exception:
+                    return
+                sid = all_hdrs.get("x-statsig-id") or all_hdrs.get("X-Statsig-Id")
+                if sid:
+                    captured["statsig"] = sid
 
             def on_request(req):
                 if captured["statsig"]:
@@ -113,9 +125,11 @@ async def bootstrap_grok_session(
                 try:
                     sid = req.headers.get("x-statsig-id")
                 except Exception:
-                    return
+                    sid = None
                 if sid:
                     captured["statsig"] = sid
+                    return
+                pending_tasks.append(asyncio.create_task(_resolve_headers(req)))
 
             page.on("request", on_request)
 
@@ -128,12 +142,17 @@ async def bootstrap_grok_session(
             except Exception as exc:
                 raise RuntimeError("Failed to load grok.com: %s" % exc)
 
+            trigger_script = (
+                "Promise.all(["
+                "fetch('/rest/app-chat/conversations?pageSize=1&responsesOnly=true',"
+                "{credentials:'include',headers:{'Accept':'application/json'}}).catch(()=>null),"
+                "fetch('/rest/rate-limits',{method:'POST',credentials:'include',"
+                "headers:{'Content-Type':'application/json','Accept':'application/json'},"
+                "body:JSON.stringify({requestKind:'DEFAULT',modelName:'grok-3'})}).catch(()=>null)"
+                "])"
+            )
             try:
-                await page.evaluate(
-                    "fetch('/rest/app-chat/conversations?pageSize=1&responsesOnly=true',"
-                    "{credentials:'include',headers:{'Accept':'application/json'}})"
-                    ".catch(()=>null)"
-                )
+                await page.evaluate(trigger_script)
             except Exception as exc:
                 logger.debug("trigger fetch evaluate failed: %s", exc)
 
@@ -143,10 +162,15 @@ async def bootstrap_grok_session(
                     break
                 await asyncio.sleep(0.25)
 
+            for task in pending_tasks:
+                if not task.done():
+                    task.cancel()
+
             statsig_id = captured["statsig"]
             if not statsig_id:
                 raise RuntimeError(
-                    "Failed to capture x-statsig-id from browser session within %ss" % timeout
+                    "Failed to capture x-statsig-id from browser session within %ss. "
+                    "Grok cookies may be invalid/expired — log in to grok.com again." % timeout
                 )
 
             all_cookies = await context.cookies()

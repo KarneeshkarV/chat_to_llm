@@ -48,19 +48,12 @@ def _get_extension_and_mime(data: bytes) -> Tuple[str, str]:
     return "jpg", "image/jpeg"
 
 
-_GROK_MODEL_MAP = {
-    "grok-4.3": "grok-4.3",
-    "grok-4.2": "grok-4.2",
-    "grok-3": "grok-3",
-    "grok-2": "grok-2",
-    "grok-beta": "grok-beta",
-}
-
-
 def _resolve_grok_model(origin_model: str) -> str:
-    for key, value in _GROK_MODEL_MAP.items():
-        if key in origin_model:
-            return value
+    name = (origin_model or "").lower()
+    if "grok-4" in name:
+        return "grok-4"
+    if "grok-3" in name or "grok-2" in name or "grok-beta" in name:
+        return "grok-3"
     return "grok-3"
 
 
@@ -100,7 +93,7 @@ class GrokService(BaseService):
         self._parent_response_id = data.get("parent_message_id")
 
         proxy = os.getenv("GROK_PROXY", "").strip() or None
-        self._client = Client(proxy=proxy, impersonate="chrome120")
+        self._client = Client(proxy=proxy, impersonate="chrome131")
 
     async def _refresh_session(self) -> None:
         if not (self.req_token and self._auth.is_browser_token(self.req_token)):
@@ -219,7 +212,7 @@ class GrokService(BaseService):
     def _build_payload(self) -> dict:
         payload: Dict[str, Any] = {
             "temporary": self.data.get("temporary", False),
-            "modelName": self.origin_model,
+            "modelName": self.resp_model,
             "message": self._message_text,
             "fileAttachments": self._file_attachments,
             "imageAttachments": [],
@@ -240,7 +233,7 @@ class GrokService(BaseService):
             "deepsearch preset": "",
             "webpageUrls": [],
             "disableArtifact": False,
-            "responseMetadata": {"requestModelDetails": {"modelId": self.origin_model}},
+            "responseMetadata": {"requestModelDetails": {"modelId": self.resp_model}},
         }
         if self._parent_response_id:
             payload["parentResponseId"] = self._parent_response_id
@@ -251,7 +244,7 @@ class GrokService(BaseService):
             "Content-Type": "application/json",
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             ),
             "Accept": "*/*",
             "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -261,7 +254,7 @@ class GrokService(BaseService):
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
-            "Sec-CH-UA": '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+            "Sec-CH-UA": '"Chromium";v="131", "Not:A-Brand";v="24", "Google Chrome";v="131"',
             "Sec-CH-UA-Mobile": "?0",
             "Sec-CH-UA-Platform": '"Windows"',
             "Priority": "u=1, i",
@@ -310,13 +303,32 @@ class GrokService(BaseService):
             "content": file_content_b64,
         }
 
-        headers = self._build_headers()
-        headers["Content-Type"] = "application/json"
+        refreshed = False
+        for attempt in range(2):
+            headers = self._build_headers()
+            headers["Content-Type"] = "application/json"
 
-        r = await self._client.post(_UPLOAD_URL, headers=headers, json=payload, timeout=60)
-        if r.status_code != 200:
-            text = r.text[:200] if hasattr(r, "text") else ""
-            raise ValueError("Image upload failed: HTTP %s - %s" % (r.status_code, text))
+            r = await self._client.post(_UPLOAD_URL, headers=headers, json=payload, timeout=60)
+            if r.status_code == 200:
+                break
+
+            text = r.text[:500] if hasattr(r, "text") else ""
+            cf_challenge = (
+                r.status_code in (403, 503)
+                and ("Just a moment" in text or "cf-chl" in text or "cloudflare" in text.lower())
+            )
+            if cf_challenge and not refreshed:
+                logger.warning("Grok upload hit Cloudflare challenge; refreshing browser session")
+                try:
+                    await self._refresh_session()
+                except Exception as refresh_exc:
+                    raise ValueError(
+                        "Image upload blocked by Cloudflare and session refresh failed: %s"
+                        % refresh_exc
+                    )
+                refreshed = True
+                continue
+            raise ValueError("Image upload failed: HTTP %s - %s" % (r.status_code, text[:200]))
 
         try:
             resp = r.json()

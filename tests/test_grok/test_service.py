@@ -40,6 +40,7 @@ class TestGrokService:
     def test_build_payload(self):
         svc = GrokService()
         svc.origin_model = "grok-3"
+        svc.resp_model = "grok-3"
         svc._message_text = "Hello"
         svc._file_attachments = ["file123"]
         svc._parent_response_id = "parent1"

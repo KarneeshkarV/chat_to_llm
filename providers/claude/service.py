@@ -310,10 +310,19 @@ class ClaudeService(BaseService):
         return _ImageAttachment(data=raw, media_type=mime, filename="upload.%s" % extension)
 
     async def _upload_image(self, image: _ImageAttachment) -> str:
+        from curl_cffi import CurlMime
+
+        mp = CurlMime()
+        mp.addpart(
+            name="file",
+            filename=image.filename,
+            content_type=image.media_type,
+            data=image.data,
+        )
         response = await self._client.post(
             f"{_HOST_URL}/api/{self._org_uuid}/upload",
             headers=self._headers(accept="application/json", include_content_type=False),
-            files={"file": (image.filename, image.data, image.media_type)},
+            multipart=mp,
             timeout=60,
         )
         if response.status_code != 200:

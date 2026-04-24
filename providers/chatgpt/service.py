@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -12,6 +13,12 @@ from starlette.concurrency import run_in_threadpool
 
 from providers.base import BaseService
 from providers.chatgpt.auth import ChatGPTAuth
+from providers.chatgpt.files import (
+    determine_file_use_case,
+    get_file_content_from_data_url,
+    get_file_extension,
+    get_image_size,
+)
 from providers.chatgpt.formatting import (
     api_messages_to_chat,
     format_not_stream_response,
@@ -248,7 +255,9 @@ class ChatGPTService(BaseService):
 
     async def prepare_send_conversation(self) -> dict:
         try:
-            chat_messages = api_messages_to_chat(self.api_messages)
+            chat_messages = await api_messages_to_chat(self, self.api_messages)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error("Failed to format messages: %s" % e)
             raise HTTPException(status_code=400, detail="Failed to format messages.")
@@ -379,3 +388,120 @@ class ChatGPTService(BaseService):
         if self.ss and self.ss is not self.s:
             await self.ss.close()
             self.ss = None
+
+    # ------------------------------------------------------------------
+    # File upload (for image input)
+    # ------------------------------------------------------------------
+
+    async def get_upload_url(
+        self, file_name: str, file_size: int, use_case: str
+    ) -> tuple:
+        url = "%s/files" % self.base_url
+        headers = self.base_headers.copy()
+        payload = {
+            "file_name": file_name,
+            "file_size": file_size,
+            "reset_rate_limits": False,
+            "timezone_offset_min": -480,
+            "use_case": use_case,
+        }
+        r = await self.s.post(url, headers=headers, json=payload, timeout=30)
+        if r.status_code != 200:
+            text = r.text[:200] if hasattr(r, "text") else ""
+            raise HTTPException(
+                status_code=r.status_code,
+                detail="Failed to get upload URL: %s" % text,
+            )
+        body = r.json()
+        file_id = body.get("file_id") or body.get("id")
+        upload_url = body.get("upload_url")
+        if not file_id or not upload_url:
+            raise HTTPException(
+                status_code=500,
+                detail="Upload URL response missing fields: %s" % body,
+            )
+        return file_id, upload_url
+
+    async def upload(self, upload_url: str, content: bytes, mime: str) -> bool:
+        headers = {k: v for k, v in self.base_headers.items()}
+        for key in ("authorization", "oai-device-id", "oai-language"):
+            headers.pop(key, None)
+        headers["content-type"] = mime
+        headers["x-ms-blob-type"] = "BlockBlob"
+        headers["x-ms-version"] = "2020-04-08"
+        r = await self.s.request(
+            "PUT", upload_url, headers=headers, data=content, timeout=60
+        )
+        if r.status_code not in (200, 201):
+            text = r.text[:200] if hasattr(r, "text") else ""
+            raise HTTPException(
+                status_code=r.status_code,
+                detail="Azure upload failed: %s" % text,
+            )
+        return True
+
+    async def get_download_url_from_upload(self, file_id: str) -> str:
+        url = "%s/files/%s/uploaded" % (self.base_url, file_id)
+        headers = self.base_headers.copy()
+        r = await self.s.post(url, headers=headers, json={}, timeout=30)
+        if r.status_code != 200:
+            text = r.text[:200] if hasattr(r, "text") else ""
+            raise HTTPException(
+                status_code=r.status_code,
+                detail="Failed to finalize upload: %s" % text,
+            )
+        body = r.json()
+        return body.get("download_url", "")
+
+    async def check_upload(self, file_id: str, timeout_s: int = 30) -> bool:
+        url = "%s/files/%s" % (self.base_url, file_id)
+        headers = self.base_headers.copy()
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                r = await self.s.get(url, headers=headers, timeout=10)
+                if r.status_code == 200:
+                    body = r.json()
+                    status = body.get("status", "")
+                    if status in ("success", "uploaded", "processed", "ready"):
+                        return True
+                    if status == "failed":
+                        raise HTTPException(
+                            status_code=500,
+                            detail="File processing failed: %s" % body,
+                        )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+        return True
+
+    async def upload_file(self, raw: bytes, mime: str) -> Dict[str, Any]:
+        use_case = determine_file_use_case(mime)
+        ext = get_file_extension(mime)
+        file_name = "image-%s%s" % (uuid.uuid4().hex[:8], ext)
+        file_size = len(raw)
+
+        width = 0
+        height = 0
+        if use_case == "multimodal":
+            width, height = get_image_size(raw)
+
+        file_id, upload_url = await self.get_upload_url(file_name, file_size, use_case)
+        await self.upload(upload_url, raw, mime)
+        await self.get_download_url_from_upload(file_id)
+
+        return {
+            "file_id": file_id,
+            "file_name": file_name,
+            "size_bytes": file_size,
+            "mime_type": mime,
+            "width": width,
+            "height": height,
+            "use_case": use_case,
+        }
+
+    async def upload_file_from_data_url(self, url: str) -> Dict[str, Any]:
+        raw, mime = get_file_content_from_data_url(url)
+        return await self.upload_file(raw, mime)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import types
+from pathlib import Path
 from typing import Optional
 
 from fastapi import HTTPException, Request, Security
@@ -8,7 +10,24 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from starlette.background import BackgroundTask
 
-from providers import get_provider
+from providers import get_provider, list_providers, resolve_provider_for_model
+
+_WATCHLIST_PATH = Path.home() / ".kite_extention" / "watchlist.json"
+
+
+def _read_watchlist():
+    if not _WATCHLIST_PATH.exists():
+        return {
+            "version": 1,
+            "generated_at": None,
+            "market": None,
+            "criteria": [],
+            "items": {},
+        }
+    try:
+        return json.loads(_WATCHLIST_PATH.read_text())
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"watchlist.json is malformed: {exc}")
 
 
 def _profile_from_headers(request: Request, provider_name: str) -> Optional[str]:
@@ -82,6 +101,50 @@ def _make_chat_route(provider_name: str, security_scheme):
     return send_conversation
 
 
+def _make_unified_chat_route(security_scheme):
+    async def send_conversation(
+        request: Request,
+        credentials: HTTPAuthorizationCredentials = Security(security_scheme),
+    ):
+        req_token = credentials.credentials
+
+        try:
+            request_data = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail={"error": "Invalid JSON body"})
+
+        model = request_data.get("model", "")
+        entry = resolve_provider_for_model(model)
+        if entry is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No provider matches model '%s'. Known providers: %s"
+                % (model, ", ".join(list_providers())),
+            )
+        provider_name = entry.name
+
+        profile = _get_profile_from_request(request, provider_name, entry.auth(), req_token)
+
+        chat_service, res = await _process_chat(
+            provider_name, request_data, req_token, profile=profile
+        )
+        try:
+            if isinstance(res, types.AsyncGeneratorType):
+                background = BackgroundTask(chat_service.close_client)
+                return StreamingResponse(res, media_type="text/event-stream", background=background)
+            else:
+                background = BackgroundTask(chat_service.close_client)
+                return JSONResponse(res, media_type="application/json", background=background)
+        except HTTPException:
+            await chat_service.close_client()
+            raise
+        except Exception:
+            await chat_service.close_client()
+            raise HTTPException(status_code=500, detail="Server error")
+
+    return send_conversation
+
+
 def _make_browser_token_route(provider_name: str):
     entry = get_provider(provider_name)
 
@@ -131,8 +194,12 @@ def _make_browser_profiles_route(provider_name: str):
 def register_routes(app) -> None:
     security_scheme = app.state.security_scheme
 
-    # ChatGPT (legacy / default endpoints)
-    app.post("/v1/chat/completions")(_make_chat_route("chatgpt", security_scheme))
+    # Unified endpoint — dispatches to provider by model name prefix.
+    # Mirrors the kite_extention feature-registry pattern: each provider declares
+    # a matches(model) predicate and the router picks the first match.
+    app.post("/v1/chat/completions")(_make_unified_chat_route(security_scheme))
+
+    # ChatGPT-specific token endpoints (legacy)
     app.post("/tokens/browser")(_make_browser_token_route("chatgpt"))
     app.get("/tokens/browser/profiles")(_make_browser_profiles_route("chatgpt"))
 
@@ -150,3 +217,6 @@ def register_routes(app) -> None:
     app.post("/v1/grok/chat/completions")(_make_chat_route("grok", security_scheme))
     app.post("/tokens/grok/browser")(_make_browser_token_route("grok"))
     app.get("/tokens/grok/browser/profiles")(_make_browser_profiles_route("grok"))
+
+    # Screener bridge — served verbatim to the Kite extension.
+    app.get("/watchlist")(lambda: _read_watchlist())

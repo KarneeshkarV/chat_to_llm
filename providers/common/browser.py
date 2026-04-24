@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_BROWSER_ORDER = ["arc", "chrome", "edge", "firefox", "brave", "zen"]
+_DEFAULT_BROWSER_ORDER = ["arc", "chrome", "chromium", "edge", "firefox", "brave", "zen"]
 
 
 def get_browser_order(env_var_name: str = "BROWSER") -> List[str]:
@@ -34,6 +34,7 @@ def chromium_roots(browser_name: str) -> List[str]:
     if sys.platform == "darwin":
         mapping = {
             "chrome": [os.path.join(home, "Library", "Application Support", "Google", "Chrome")],
+            "chromium": [os.path.join(home, "Library", "Application Support", "Chromium")],
             "arc": [os.path.join(home, "Library", "Application Support", "Arc", "User Data")],
             "edge": [os.path.join(home, "Library", "Application Support", "Microsoft Edge")],
             "brave": [
@@ -46,6 +47,7 @@ def chromium_roots(browser_name: str) -> List[str]:
         local_appdata = os.environ.get("LOCALAPPDATA", "")
         mapping = {
             "chrome": [os.path.join(local_appdata, "Google", "Chrome", "User Data")],
+            "chromium": [os.path.join(local_appdata, "Chromium", "User Data")],
             "arc": [os.path.join(local_appdata, "Arc", "User Data")],
             "edge": [os.path.join(local_appdata, "Microsoft", "Edge", "User Data")],
             "brave": [os.path.join(local_appdata, "BraveSoftware", "Brave-Browser", "User Data")],
@@ -56,8 +58,8 @@ def chromium_roots(browser_name: str) -> List[str]:
             "chrome": [
                 os.path.join(config_dir, "google-chrome"),
                 os.path.join(config_dir, "Google", "Chrome"),
-                os.path.join(config_dir, "chromium"),
             ],
+            "chromium": [os.path.join(config_dir, "chromium")],
             "arc": [],
             "edge": [os.path.join(config_dir, "microsoft-edge")],
             "brave": [os.path.join(config_dir, "BraveSoftware", "Brave-Browser")],

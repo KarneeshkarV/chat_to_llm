@@ -117,6 +117,7 @@ class ChatGPTAuth(BaseAuth):
         browser_loaders = {
             "arc": getattr(browser_cookie3, "arc", None),
             "chrome": getattr(browser_cookie3, "chrome", None),
+            "chromium": getattr(browser_cookie3, "chromium", None),
             "edge": getattr(browser_cookie3, "edge", None),
             "firefox": getattr(browser_cookie3, "firefox", None),
             "brave": getattr(browser_cookie3, "brave", None),
@@ -186,6 +187,7 @@ class ChatGPTAuth(BaseAuth):
         browser_loaders = {
             "arc": getattr(browser_cookie3, "arc", None),
             "chrome": getattr(browser_cookie3, "chrome", None),
+            "chromium": getattr(browser_cookie3, "chromium", None),
             "edge": getattr(browser_cookie3, "edge", None),
             "firefox": getattr(browser_cookie3, "firefox", None),
             "brave": getattr(browser_cookie3, "brave", None),

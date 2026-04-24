@@ -24,20 +24,45 @@ def _generate_chat_id() -> str:
     )
 
 
-def _to_chat_message(role: str, content: Any) -> dict:
+async def _to_chat_message(service: Any, role: str, content: Any) -> dict:
     if isinstance(content, list):
         parts: list = []
         attachments: list = []
+        has_image = False
         for item in content:
-            if item.get("type") == "text":
+            item_type = item.get("type")
+            if item_type == "text":
                 parts.append(item.get("text", ""))
-            elif item.get("type") == "image_url":
-                parts.append("[image: %s]" % item.get("image_url", {}).get("url", ""))
+            elif item_type == "image_url":
+                url = item.get("image_url", {}).get("url", "")
+                uploaded = await service.upload_file_from_data_url(url)
+                asset_part: dict = {
+                    "content_type": "image_asset_pointer",
+                    "asset_pointer": "file-service://%s" % uploaded["file_id"],
+                    "size_bytes": uploaded.get("size_bytes", 0),
+                    "width": uploaded.get("width", 0),
+                    "height": uploaded.get("height", 0),
+                }
+                parts.append(asset_part)
+                attachments.append(
+                    {
+                        "id": uploaded["file_id"],
+                        "size": uploaded.get("size_bytes", 0),
+                        "name": uploaded.get("file_name", ""),
+                        "mime_type": uploaded.get("mime_type", ""),
+                        "width": uploaded.get("width", 0),
+                        "height": uploaded.get("height", 0),
+                    }
+                )
+                has_image = True
+        content_type = "multimodal_text" if has_image else "text"
+        if not has_image:
+            parts = [p if isinstance(p, str) else "" for p in parts] or [""]
         return {
             "id": str(uuid.uuid4()),
             "author": {"role": role},
-            "content": {"content_type": "multimodal_text", "parts": parts},
-            "metadata": {"attachments": attachments},
+            "content": {"content_type": content_type, "parts": parts},
+            "metadata": {"attachments": attachments} if attachments else {},
         }
     return {
         "id": str(uuid.uuid4()),
@@ -47,14 +72,14 @@ def _to_chat_message(role: str, content: Any) -> dict:
     }
 
 
-def api_messages_to_chat(api_messages: List[dict]) -> List[dict]:
+async def api_messages_to_chat(service: Any, api_messages: List[dict]) -> List[dict]:
     chat_messages: List[dict] = []
     for msg in api_messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
         if role == "system":
             role = "system"
-        chat_messages.append(_to_chat_message(role, content))
+        chat_messages.append(await _to_chat_message(service, role, content))
     return chat_messages
 
 

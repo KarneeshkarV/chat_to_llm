@@ -175,18 +175,18 @@ class TestBrowserOrder:
     def test_default_order(self, monkeypatch):
         monkeypatch.delenv("CHATGPT_BROWSER", raising=False)
         order = browser_auth._get_browser_order()
-        assert order == ["arc", "chrome", "edge", "firefox", "brave", "zen"]
+        assert order == ["arc", "chrome", "chromium", "edge", "firefox", "brave", "zen"]
 
     def test_env_overrides_priority(self, monkeypatch):
         monkeypatch.setenv("CHATGPT_BROWSER", "firefox")
         order = browser_auth._get_browser_order()
         assert order[0] == "firefox"
-        assert len(order) == 6
+        assert len(order) == 7
 
     def test_invalid_env_uses_default(self, monkeypatch):
         monkeypatch.setenv("CHATGPT_BROWSER", "safari")
         order = browser_auth._get_browser_order()
-        assert order == ["arc", "chrome", "edge", "firefox", "brave", "zen"]
+        assert order == ["arc", "chrome", "chromium", "edge", "firefox", "brave", "zen"]
 
 
 class TestChatGPTDomainMatching:

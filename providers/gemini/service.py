@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
@@ -17,6 +18,19 @@ from providers.gemini.formatting import GeminiFormatter
 logger = logging.getLogger(__name__)
 
 _PROXY_URL = os.getenv("GEMINI_PROXY", "").strip() or os.getenv("PROXY_URL", "").strip() or None
+
+try:
+    _GEMINI_INIT_TIMEOUT = float(os.getenv("GEMINI_INIT_TIMEOUT", "30"))
+except ValueError:
+    _GEMINI_INIT_TIMEOUT = 30.0
+try:
+    _GEMINI_REQUEST_TIMEOUT = float(os.getenv("GEMINI_REQUEST_TIMEOUT", "300"))
+except ValueError:
+    _GEMINI_REQUEST_TIMEOUT = 300.0
+try:
+    _GEMINI_WATCHDOG_TIMEOUT = float(os.getenv("GEMINI_WATCHDOG_TIMEOUT", "240"))
+except ValueError:
+    _GEMINI_WATCHDOG_TIMEOUT = 240.0
 _IMAGE_MIME_TO_EXT = {
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -82,7 +96,7 @@ class GeminiService(BaseService):
     async def set_dynamic_data(self, data: Dict[str, Any], profile: Optional[str] = None) -> None:
         self.data = data
         self._profile = profile
-        self.origin_model = data.get("model", "gemini-2.5-flash")
+        self.origin_model = data.get("model", "gemini-3-flash")
         self.resp_model = self.origin_model
         self.max_tokens = data.get("max_tokens", 4096)
         if not isinstance(self.max_tokens, int):
@@ -121,9 +135,24 @@ class GeminiService(BaseService):
 
         self._client = GeminiClient(self.secure_1psid, self.secure_1psidts or "", proxy=_PROXY_URL)
         try:
-            await self._client.init(timeout=30, auto_close=False, close_delay=300, auto_refresh=True)
+            await asyncio.wait_for(
+                self._client.init(
+                    timeout=_GEMINI_REQUEST_TIMEOUT,
+                    auto_close=False,
+                    close_delay=300,
+                    auto_refresh=True,
+                    watchdog_timeout=_GEMINI_WATCHDOG_TIMEOUT,
+                ),
+                timeout=_GEMINI_INIT_TIMEOUT,
+            )
         except HTTPException:
             raise
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail="Gemini session init timed out after %ss. Cookies may be expired — re-login to gemini.google.com."
+                % _GEMINI_INIT_TIMEOUT,
+            )
         except Exception as exc:
             raise HTTPException(status_code=401, detail="Failed to initialize Gemini session: %s" % exc)
 
@@ -166,11 +195,14 @@ class GeminiService(BaseService):
                     self.max_tokens,
                 )
 
-            response = await self._client.generate_content(
-                prompt,
-                files=files,
-                model=model,
-                temporary=temporary,
+            response = await asyncio.wait_for(
+                self._client.generate_content(
+                    prompt,
+                    files=files,
+                    model=model,
+                    temporary=temporary,
+                ),
+                timeout=_GEMINI_REQUEST_TIMEOUT,
             )
             text = self._response_text(response)
             return self._formatter.build_response(
@@ -181,6 +213,11 @@ class GeminiService(BaseService):
             )
         except HTTPException:
             raise
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail="Gemini request timed out after %ss." % _GEMINI_REQUEST_TIMEOUT,
+            )
         except Exception as exc:
             raise HTTPException(status_code=500, detail="Gemini request failed: %s" % exc)
 
