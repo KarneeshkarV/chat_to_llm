@@ -11,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from starlette.background import BackgroundTask
 
 from providers import get_provider, list_providers, resolve_provider_for_model
+from providers.tools import run_with_tools_route
 
 _WATCHLIST_PATH = Path.home() / ".kite_extention" / "watchlist.json"
 
@@ -81,6 +82,11 @@ def _make_chat_route(provider_name: str, security_scheme):
         except Exception:
             raise HTTPException(status_code=400, detail={"error": "Invalid JSON body"})
 
+        if request_data.get("enable_tools"):
+            return await run_with_tools_route(
+                provider_name, request_data, req_token, profile
+            )
+
         chat_service, res = await _process_chat(
             provider_name, request_data, req_token, profile=profile
         )
@@ -124,6 +130,11 @@ def _make_unified_chat_route(security_scheme):
         provider_name = entry.name
 
         profile = _get_profile_from_request(request, provider_name, entry.auth(), req_token)
+
+        if request_data.get("enable_tools"):
+            return await run_with_tools_route(
+                provider_name, request_data, req_token, profile
+            )
 
         chat_service, res = await _process_chat(
             provider_name, request_data, req_token, profile=profile

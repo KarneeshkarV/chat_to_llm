@@ -188,12 +188,6 @@ class ClaudeService(BaseService):
             self._client = None
 
     def _validate_request(self) -> None:
-        if self.data.get("tools") or self.data.get("tool_choice"):
-            raise HTTPException(
-                status_code=400,
-                detail="Claude web tool calling is not implemented on this endpoint.",
-            )
-
         if self.data.get("n") not in (None, 1):
             raise HTTPException(
                 status_code=400,

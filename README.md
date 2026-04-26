@@ -26,6 +26,7 @@ No API keys. No ChatGPT Plus required. Just your existing browser session.
   - [Direct access token](#direct-access-token)
   - [Browser token check](#browser-token-check)
   - [Force token refresh](#force-token-refresh)
+  - [Tool calling (enable_tools)](#tool-calling-enable_tools)
 - [Response Formats](#response-formats)
   - [Non-streaming response](#non-streaming-response)
   - [Streaming response](#streaming-response)
@@ -60,7 +61,7 @@ Test it:
 curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer browser" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
+  -d '{"model":"gpt-5.4","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
 ```
 
 ### Claude Quickstart
@@ -77,7 +78,7 @@ Test Claude:
 curl http://localhost:8000/v1/claude/chat/completions \
   -H "Authorization: Bearer claude-browser" \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
+  -d '{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
 ```
 
 ### Gemini Quickstart
@@ -94,7 +95,7 @@ Test Gemini:
 curl http://localhost:8000/v1/gemini/chat/completions \
   -H "Authorization: Bearer gemini-browser" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
+  -d '{"model":"gemini-3-pro","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
 ```
 
 ### Grok Quickstart
@@ -117,7 +118,7 @@ Test Grok:
 curl http://localhost:8000/v1/grok/chat/completions \
   -H "Authorization: Bearer browser" \
   -H "Content-Type: application/json" \
-  -d '{"model":"grok-3","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
+  -d '{"model":"grok-4.3","messages":[{"role":"user","content":"Say hello"}],"stream":false}'
 ```
 
 The first request triggers a ~3-5s bootstrap. Subsequent requests reuse the cached session (15 min by default) and complete in under 2s.
@@ -137,7 +138,7 @@ OpenAI-compatible chat completions endpoint.
 
 | Body field | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | `gpt-4o` | Model name (see [Supported Models](#supported-models)) |
+| `model` | string | `gpt-5.4` | Model name (see [Supported Models](#supported-models)) |
 | `messages` | array | required | OpenAI-style message list |
 | `stream` | boolean | `false` | Enable SSE streaming |
 | `max_tokens` | integer | `2147483647` | Max tokens in response |
@@ -166,12 +167,12 @@ OpenAI-compatible Claude Web endpoint exposed separately from the default ChatGP
 
 | Body field | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | `claude-3-5-sonnet-latest` | Claude Web model name |
+| `model` | string | `claude-sonnet-4-5` | Claude Web model name |
 | `messages` | array | required | OpenAI-style message list |
 | `stream` | boolean | `false` | Enable SSE streaming |
 | `max_tokens` | integer | `4096` | Max tokens in response |
 
-Claude Web v1 on this repo supports text chat and `data:` URL images. Tool calling is rejected with `400`.
+Claude Web v1 on this repo supports text chat and `data:` URL images. Server-side tool calling is available via the [`enable_tools`](#tool-calling-enable_tools) flag.
 
 ### POST /tokens/claude/browser
 
@@ -201,14 +202,14 @@ OpenAI-compatible Gemini Web endpoint exposed separately from the default ChatGP
 
 | Body field | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | `gemini-2.5-flash` | Gemini Web model name |
+| `model` | string | `gemini-3-pro` | Gemini Web model name |
 | `messages` | array | required | OpenAI-style message list |
 | `stream` | boolean | `false` | Enable SSE streaming |
 | `stream_final_json` | boolean | `false` | Append a final `response.completed` SSE event containing the aggregated JSON response |
 | `max_tokens` | integer | `4096` | Approximate max tokens in response |
 | `temporary` | boolean | `false` | Use Gemini temporary mode when supported |
 
-Gemini v1 on this repo supports text chat and local-path / `data:` URL files. Tool calling is rejected with `400`.
+Gemini v1 on this repo supports text chat and local-path / `data:` URL files. Server-side tool calling is available via the [`enable_tools`](#tool-calling-enable_tools) flag.
 
 ### POST /tokens/gemini/browser
 
@@ -237,7 +238,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer browser" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "user", "content": "What is 2+2?"}
     ],
@@ -252,7 +253,7 @@ curl -sN http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer browser" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "user", "content": "Explain quantum computing in 3 sentences"}
     ],
@@ -269,7 +270,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer browser" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "user", "content": "My name is Alice"},
       {"role": "assistant", "content": "Nice to meet you, Alice!"},
@@ -286,7 +287,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer browser" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "system", "content": "You are a pirate. Always respond in pirate speak."},
       {"role": "user", "content": "Hello!"}
@@ -304,7 +305,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "gpt-5.4",
     "messages": [{"role": "user", "content": "Hello!"}],
     "stream": false
   }'
@@ -360,6 +361,65 @@ For Gemini:
 curl -X POST "http://localhost:8000/tokens/gemini/browser?force_refresh=true"
 ```
 
+### Tool calling (enable_tools)
+
+Set `"enable_tools": true` in the request body to give the model access to server-side built-in tools. The server prompt-injects tool instructions into the system message, runs any tool calls itself, feeds results back to the model, and returns only the final answer to the client.
+
+This works uniformly across **all four providers** (ChatGPT, Claude, Gemini, Grok), because tool calling is implemented entirely via prompt injection — the underlying web backends don't need to support tool calling natively.
+
+**Currently registered built-in tools:**
+
+| Tool | Arguments | Description |
+|---|---|---|
+| `web_search` | `query: str` | DuckDuckGo HTML search; returns top 5 results (title, url, snippet). No API key required. |
+
+**Request shape:**
+
+```json
+{
+  "model": "claude-sonnet-4-5",
+  "messages": [{"role": "user", "content": "What did SpaceX launch this week?"}],
+  "enable_tools": true,
+  "stream": true
+}
+```
+
+**One curl per provider** (using canonical model names):
+
+```bash
+# ChatGPT
+curl -N http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer browser" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5.4","messages":[{"role":"user","content":"What did SpaceX launch this week? Cite sources."}],"enable_tools":true,"stream":true}'
+
+# Claude
+curl -N http://localhost:8000/v1/claude/chat/completions \
+  -H "Authorization: Bearer claude-browser" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"What did SpaceX launch this week? Cite sources."}],"enable_tools":true,"stream":true}'
+
+# Gemini
+curl -N http://localhost:8000/v1/gemini/chat/completions \
+  -H "Authorization: Bearer gemini-browser" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemini-3-pro","messages":[{"role":"user","content":"What did SpaceX launch this week? Cite sources."}],"enable_tools":true,"stream":true}'
+
+# Grok
+curl -N http://localhost:8000/v1/grok/chat/completions \
+  -H "Authorization: Bearer browser" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"grok-4.3","messages":[{"role":"user","content":"What did SpaceX launch this week? Cite sources."}],"enable_tools":true,"stream":true}'
+```
+
+**Notes:**
+
+- Opt-in only. Without `enable_tools: true`, behavior is identical to today.
+- The server controls the tool catalog. The OpenAI-style `tools` and `tool_choice` request fields are ignored for this first cut.
+- Tool calls use a fenced JSON format the model emits: ` ```tool_call\n{"name":"web_search","arguments":{"query":"..."}}\n``` `. Tool results are fed back as a `tool_result` block in the next user turn.
+- Hard cap: 5 tool calls per request (override with `TOOL_LOOP_MAX_ITERS`).
+- Streaming responses are emitted as a single chunk once the loop produces the final answer (the loop runs each turn non-streaming internally).
+
 ---
 
 ## Response Formats
@@ -371,7 +431,7 @@ curl -X POST "http://localhost:8000/tokens/gemini/browser?force_refresh=true"
   "id": "chatcmpl-t6sCRpYEEWWX1q1tSfJyAnrxlNlWx",
   "object": "chat.completion",
   "created": 1776679436,
-  "model": "gpt-4o-mini",
+  "model": "gpt-5.4",
   "choices": [
     {
       "index": 0,
@@ -396,11 +456,11 @@ curl -X POST "http://localhost:8000/tokens/gemini/browser?force_refresh=true"
 Each chunk is a `data:` line followed by two newlines. The final line is `data: [DONE]`.
 
 ```
-data: {"id":"chatcmpl-WNy...","object":"chat.completion.chunk","created":1776679457,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}]}
+data: {"id":"chatcmpl-WNy...","object":"chat.completion.chunk","created":1776679457,"model":"gpt-5.4","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}]}
 
-data: {"id":"chatcmpl-WNy...","object":"chat.completion.chunk","created":1776679457,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"1  \n2"},"logprobs":null,"finish_reason":null}]}
+data: {"id":"chatcmpl-WNy...","object":"chat.completion.chunk","created":1776679457,"model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"1  \n2"},"logprobs":null,"finish_reason":null}]}
 
-data: {"id":"chatcmpl-WNy...","object":"chat.completion.chunk","created":1776679457,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"  \n3  \n4  \n5"},"logprobs":null,"finish_reason":"stop"}]}
+data: {"id":"chatcmpl-WNy...","object":"chat.completion.chunk","created":1776679457,"model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"  \n3  \n4  \n5"},"logprobs":null,"finish_reason":"stop"}]}
 
 data: [DONE]
 ```
@@ -409,7 +469,7 @@ For Gemini only, if you send `"stream_final_json": true`, the stream appends one
 
 ```text
 event: response.completed
-data: {"id":"chatcmpl-...","object":"chat.completion","created":1776772341,"model":"gemini-3-flash","choices":[{"index":0,"message":{"role":"assistant","content":"1\n2\n3"},"logprobs":null,"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":1,"total_tokens":13}}
+data: {"id":"chatcmpl-...","object":"chat.completion","created":1776772341,"model":"gemini-3-pro","choices":[{"index":0,"message":{"role":"assistant","content":"1\n2\n3"},"logprobs":null,"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":1,"total_tokens":13}}
 ```
 
 | Chunk type | `delta` content | `finish_reason` |
@@ -532,6 +592,7 @@ All configuration is via environment variables or `.env` file.
 |---|---|---|
 | `HISTORY_DISABLED` | `true` | Don't save conversations in ChatGPT history |
 | `CONVERSATION_ONLY` | `false` | Skip sentinel/chat-requirements handshake (dev only) |
+| `TOOL_LOOP_MAX_ITERS` | `5` | Max tool-call iterations per request when `enable_tools` is set |
 
 ### Grok
 
@@ -702,10 +763,12 @@ Claude model names are passed through directly to Claude Web.
 
 | Request model | Claude backend model |
 |---|---|
-| `claude-3-5-sonnet-latest` | `claude-3-5-sonnet-latest` |
-| `claude-3-7-sonnet-latest` | `claude-3-7-sonnet-latest` |
+| `claude-sonnet-4-5` | `claude-sonnet-4-5` |
+| `claude-opus-4-5` | `claude-opus-4-5` |
 | `claude-sonnet-4-0` | `claude-sonnet-4-0` |
 | `claude-opus-4-0` | `claude-opus-4-0` |
+| `claude-3-7-sonnet-latest` | `claude-3-7-sonnet-latest` |
+| `claude-3-5-sonnet-latest` | `claude-3-5-sonnet-latest` |
 | Anything else | Passed through as-is |
 
 Availability depends on your Claude account tier and whatever models Claude Web currently exposes to that account.
@@ -718,9 +781,11 @@ Gemini model names are passed through directly to `gemini-webapi`, which discove
 
 | Request model | Gemini backend model |
 |---|---|
-| `gemini-2.5-flash` | `gemini-2.5-flash` |
-| `gemini-2.5-pro` | `gemini-2.5-pro` |
 | `gemini-3-pro` | `gemini-3-pro` |
+| `gemini-3-flash` | `gemini-3-flash` |
+| `gemini-3-flash-thinking` | `gemini-3-flash-thinking` |
+| `gemini-2.5-pro` | `gemini-2.5-pro` |
+| `gemini-2.5-flash` | `gemini-2.5-flash` |
 | Anything else | Passed through as-is |
 
 Availability depends on your Google account tier and the Gemini Web models currently exposed to that account.
@@ -952,7 +1017,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-4o-mini",
+    model="gpt-5.4",
     messages=[{"role": "user", "content": "Hello!"}],
     stream=False,
 )
@@ -968,7 +1033,7 @@ from langchain_openai import ChatOpenAI
 llm = ChatOpenAI(
     base_url="http://localhost:8000/v1",
     api_key="browser",
-    model="gpt-4o-mini",
+    model="gpt-5.4",
 )
 
 response = llm.invoke("What is the capital of France?")
@@ -982,7 +1047,7 @@ curl -sN http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer browser" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "gpt-5.4",
     "messages": [{"role": "user", "content": "Tell me a story"}],
     "stream": true
   }'

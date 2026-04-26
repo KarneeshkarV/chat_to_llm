@@ -241,12 +241,6 @@ class GeminiService(BaseService):
                 logger.warning("Failed to remove Gemini temp file %s: %s", path, exc)
 
     def _validate_request(self) -> None:
-        if self.data.get("tools") or self.data.get("tool_choice"):
-            raise HTTPException(
-                status_code=400,
-                detail="Gemini web tool calling is not implemented on this endpoint.",
-            )
-
         if self.data.get("n") not in (None, 1):
             raise HTTPException(
                 status_code=400,

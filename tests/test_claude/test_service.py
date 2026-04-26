@@ -43,16 +43,14 @@ class TestClaudeService:
         assert len(images) == 1
         assert images[0].media_type == "image/png"
 
-    def test_validate_request_rejects_tools(self):
+    def test_validate_request_silently_accepts_tools(self):
         svc = ClaudeService()
         svc.data = {
             "messages": [{"role": "user", "content": "Hi"}],
             "tools": [{"type": "function"}],
+            "tool_choice": "auto",
         }
-        with pytest.raises(HTTPException) as exc_info:
-            svc._validate_request()
-        assert exc_info.value.status_code == 400
-        assert "tool calling" in exc_info.value.detail.lower()
+        svc._validate_request()
 
     def test_parse_message_content_rejects_non_data_url_images(self):
         svc = ClaudeService()

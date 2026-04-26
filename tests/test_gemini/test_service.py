@@ -46,16 +46,14 @@ class TestGeminiService:
         assert os.path.exists(files[0])
         asyncio.run(svc.close_client())
 
-    def test_validate_request_rejects_tools(self):
+    def test_validate_request_silently_accepts_tools(self):
         svc = GeminiService()
         svc.data = {
             "messages": [{"role": "user", "content": "Hi"}],
             "tools": [{"type": "function"}],
+            "tool_choice": "auto",
         }
-        with pytest.raises(HTTPException) as exc_info:
-            svc._validate_request()
-        assert exc_info.value.status_code == 400
-        assert "tool calling" in exc_info.value.detail.lower()
+        svc._validate_request()
 
     def test_parse_message_content_rejects_remote_images(self):
         svc = GeminiService()
